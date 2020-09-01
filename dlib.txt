@@ -1,0 +1,178 @@
+
+from scipy.spatial import distance as dist
+from imutils.video import VideoStream
+from imutils import face_utils
+import argparse
+import imutils
+import time
+import dlib #machine learning kutuphanesi. facial landmark detector da temelde dlib ile calisiyor
+import cv2 #openCV kutuphanesi
+# from RPLCD import CharLCD
+
+
+def eye_aspect_ratio(eye):
+    A = dist.euclidean(eye[1], eye[5]) #yatay oklit uzunlugu ve gozlerin koordinat hesaplamalari icin
+    B = dist.euclidean(eye[2], eye[4]) #yatay oklit uzunlugu ve gozlerin koordinat hesaplamalari icin
+    C = dist.euclidean(eye[0], eye[3]) #dikey oklit uzunlugu ve gozlerin koordinat hesaplamalari icin
+    ear = (A + B) / (2.0 * C) # "eye aspect ratio" hesabi
+    return ear
+
+
+EYE_AR_THRESH = 0.2
+COUNTER = 0 #goz kapaliyken gecen frame sayisini tutucak
+S_BLINK = 0 #belli araliktaki counter degerleri icin short blink tanimlamasi
+L_BLINK = 0 #belli araliktaki counter degerleri icin long blink tanimlamasi
+WORD_COUNT = 0 #her 5 blinkte 1 artarak kacinci kelimede oldugumuzu gosteren degisken
+TOTAL_BLINK = 0 #her 5 blinkte sifirlanan toplam gozkirpmayi tutan degisken
+# lcd = CharLCD(cols=16, rows=2, pin_rs=37, pin_e=35, pins_data=[40, 38, 36, 32, 33, 31, 29, 23])
+
+MY_ABC = {"00000": "SIFIR", #32 kelimelik python dictionary si
+          "00001": "BIR",
+          "00010": "IKI",
+          "00011": "UC",
+          "00100": "DORT",
+          "00101": "BES",
+          "00110": "ALTI",
+          "00111": "YEDI",
+          "01000": "SEKIZ",
+          "01001": "DOKUZ",
+          "01010": "ON",
+          "01011": "ONBIR",
+          "01100": "ONIKI",
+          "01101": "ONUC",
+          "01110": "ONDORT",
+          "01111": "ONBES",
+          "10000": "ONALTI",
+          "10001": "ONYEDI",
+          "10010": "ONSEKIZ",
+          "10011": "ONDOKUZ",
+          "10100": "YIRMI",
+          "10101": "YIRMIBIR",
+          "10110": "YIRMIIKI",
+          "10111": "YIRMIUC",
+          "11000": "YIRMIDORT",
+          "11001": "YIRMIBES",
+          "11010": "YIRMIALTI",
+          "11011": "YIRMIYEDI",
+          "11100": "YIRMISEKIZ",
+          "11101": "YIRMIDOKUZ",
+          "11110": "OTUZ",
+          "11111": "OTUZBIR",}  # dictionary
+BLINKS = "" # bos string
+
+def PROCESS_MSG(BLINKS): #hangi blink kombinasyonunun hangi harfe geldigini alip
+#word count ile beraber denk gelen kelimeyi ekrana basan fonksiyon    
+    if(BLINKS in list(MY_ABC.keys())):#anahtar
+        print (MY_ABC[BLINKS]) 
+        print (WORD_COUNT)
+        BLINKS=""#sifirladik ki yeni kelime yazabilelim
+        return ""
+    return BLINKS
+
+ap = argparse.ArgumentParser() # dlib machine learning ile olusturulan facial landmark 
+#dosyasinin implemantasyonu, input degiskenlerinin atanmasi
+ap.add_argument("-p", "--shape-predictor", default="shape_predictor_68_face_landmarks.dat",
+                help="path to facial landmark predictor")
+ap.add_argument("-v", "--video", type=str, default="camera",
+                help="path to input video file")
+ap.add_argument("-t", "--threshold", type=float, default=0.27,
+                help="threshold to determine closed eyes")
+ap.add_argument("-f", "--frames", type=int, default=2,
+                help="the number of consecutive frames the eye must be below the threshold")
+
+def main():
+    
+    global EYE_AR_THRESH #global degisken atamalari
+    global COUNTER
+    global S_BLINK
+    global L_BLINK
+    global WORD_COUNT
+    global TOTAL_BLINK
+    global BLINKS
+    global lcd # raspberry ve lcd ye baglandiginda gerekli degisken
+    
+    args = vars(ap.parse_args())
+    EYE_AR_THRESH = args['threshold']
+
+    print("[INFO] loading facial landmark predictor...")
+    detector = dlib.get_frontal_face_detector() #dlib face detector initialize 
+    predictor = dlib.shape_predictor(args["shape_predictor"])
+    #sol ve sag goz icin facial landmarklarin cekilmesi
+    (lStart, lEnd) = face_utils.FACIAL_LANDMARKS_IDXS["left_eye"]
+    (rStart, rEnd) = face_utils.FACIAL_LANDMARKS_IDXS["right_eye"]
+
+    print("[INFO] starting video stream thread...")
+    #bilgisayar ekraninda blinklerin takibi ve deneme icin video stream acilmasi 
+    print("[INFO] print x to quit...")
+    if args['video'] == "camera":
+        vs = VideoStream(src=0).start()
+
+    time.sleep(1.0)
+
+    while True:
+
+        frame = vs.read() # canli görüntürden her bir frame'i cekmek icin
+        frame = imutils.resize(frame, width=450) #goruntunun resize edilmesi 
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) #opencv kullanilarak goruntunun gray scale e cevrilmesi
+
+        rects = detector(gray, 0)
+
+        for rect in rects:
+            #facial landmarklarin ve koordinatlarin algilanmasi
+            shape = predictor(gray, rect)
+            shape = face_utils.shape_to_np(shape)
+            # gözlere ait koordinatlar cekilir
+            leftEye = shape[lStart:lEnd]
+            rightEye = shape[rStart:rEnd]
+            leftEAR = eye_aspect_ratio(leftEye)
+            rightEAR = eye_aspect_ratio(rightEye)
+
+            ear = (leftEAR + rightEAR) / 2.0  #iki göz için de ortalama aspect ratio hesaplanir
+
+            leftEyeHull = cv2.convexHull(leftEye)
+            rightEyeHull = cv2.convexHull(rightEye)
+            cv2.drawContours(frame, [leftEyeHull], -1, (0, 255, 0), 1)
+            cv2.drawContours(frame, [rightEyeHull], -1, (0, 255, 0), 1)
+            if ear < EYE_AR_THRESH:
+                COUNTER += 1
+
+            else: 
+                if COUNTER >= 10 and COUNTER < 100: #10-100 frame arasi long blink olarak tanimlandi
+                    TOTAL_BLINK += 1
+                    L_BLINK+=1 #long blink sayaci artirilir
+                    BLINKS+="1" #blinks stringine 1 eklenir
+                    
+                    if TOTAL_BLINK==5: #blink 5 oldugunda 1 kelime bitmis demek
+                        WORD_COUNT+=1 #kelime sayisi artirilir
+                        TOTAL_BLINK=0 #toplam blink sifirlanir
+                        BLINKS=PROCESS_MSG(BLINKS)
+                        #lcd.write_string(BLINKS=PROCESS_MSG(BLINKS))     
+                if COUNTER > 2 and COUNTER < 10: #2-10 frame arasi short blink olarak tanimlandi
+                    TOTAL_BLINK += 1
+                    S_BLINK+=1 #short blink sayaci 1 artirilir
+                    BLINKS+="0" #blinks stringine 0 eklenir
+                       
+                    if TOTAL_BLINK==5:
+                        WORD_COUNT+=1
+                        TOTAL_BLINK=0
+                        BLINKS=PROCESS_MSG(BLINKS) #fonksiyon cagirilir blinks dictionary ile karsilastirilir
+                        #lcd.write_string(BLINKS=PROCESS_MSG(BLINKS))
+                COUNTER=0
+            #blink sayisi, kelime sayisi ve eye aspect ratio'nun frame'e bastirilmasi 
+            cv2.putText(frame, "Blinks: {}".format(TOTAL_BLINK), (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+            cv2.putText(frame, "Word Count: {}".format(WORD_COUNT), (10, 60),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (127, 127, 0), 2)
+            cv2.putText(frame, "Eye Aspect Ratio: {:.2f}".format(ear), (250, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+
+        cv2.imshow("Frame", frame)  #frame in acilmasi
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord("x"): #cikmak icin frame acikken x e basilabilir
+            break
+
+    cv2.destroyAllWindows()
+    vs.stop()
+
+if __name__ == '__main__':
+    main()

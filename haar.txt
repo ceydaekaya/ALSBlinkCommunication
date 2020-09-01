@@ -1,0 +1,139 @@
+import cv2
+from time import time
+import os
+import glob
+import numpy as np
+from threading import Thread
+from RPLCD import CharLCD
+
+lcd = CharLCD(cols=16, rows=2, pin_rs=37, pin_e=35, pins_data=[40, 38, 36, 32, 33, 31, 29, 23])
+s_blink = 0 #belli araliktaki counter degerleri icin short blink tanimlamasi
+l_blink = 0 #belli araliktaki counter degerleri icin long blink tanimlamasi
+#word_count = 0 
+total_blink = 0 #toplam gozkirpmayi tutan degisken
+
+MY_ABC = {"000000": "SIFIR", #64 kelimelik python dictionary si
+          "000001": "BIR",
+          "000010": "IKI",
+          "000011": "UC",
+          "000100": "DORT",
+          "000101": "BES",
+          "000110": "ALTI",
+          "000111": "YEDI",
+          "001000": "SEKIZ",
+          "001001": "DOKUZ",
+          "001010": "ON",
+          "001011": "ONBIR",
+          "001100": "ONIKI",
+          "001101": "ONUC",
+          "001110": "ONDORT",
+          "001111": "ONBES",
+          "010000": "ONALTI",
+          "010001": "ONYEDI",
+          "010010": "ONSEKIZ",
+          "010011": "ONDOKUZ",
+          "010100": "YIRMI",
+          "010101": "YIRMIBIR",
+          "010110": "YIRMIIKI",
+          "010111": "YIRMIUC",
+          "011000": "YIRMIDORT",
+          "011001": "YIRMIBES",
+          "011010": "YIRMIALTI",
+          "011011": "YIRMIYEDI",
+          "011100": "YIRMISEKIZ",
+          "011101": "YIRMIDOKUZ",
+          "011110": "OTUZ",
+          "011111": "OTUZBIR",
+
+	"100000": "OTUZIKI",
+          "100001": "OTUZUC",
+          "100010": "OTUZDORT",
+          "100011": "OTUZBES",
+          "100100": "OTUZALTI",
+          "100101": "OTUZYEDI",
+          "100110": "OTUZSEKIZ",
+          "100111": "OTUZDOKUZ",
+          "101000": "KIRK",
+          "101001": "KIRKBIR",
+          "101010": "KIRKIKI",
+          "101011": "KIRKUC",
+          "101100": "KIRKDORT",
+          "101101": "KIRKBES",
+          "101110": "KIRKALTI",
+          "101111": "KIRKYEDI",
+          "110000": "KIRKSEKIZ",
+          "110001": "KIRKDOKUZ",
+          "110010": "ELLI",
+          "110011": "ELLIBIR",
+          "110100": "ELLIIKI",
+          "110101": "ELLIUC",
+          "110110": "ELLIDORT",
+          "110111": "ELLIBES",
+          "111000": "ELLIALTI",
+          "111001": "ELLIYEDI",
+          "111010": "ELLISEKIZ",
+          "111011": "ELLIDOKUZ",
+          "111100": "ALTMIS",
+          "111101": "ALTMISBIR",
+          "111110": "ALTMISIKI",
+          "111111": "ALTMISUC",}  # dictionary
+BLINKS = "" # bos string
+
+def PROCESS_MSG(BLINKS): #hangi blink kombinasyonunun hangi harfe geldigini alip
+#word count ile beraber denk gelen kelimeyi ekrana basan fonksiyon    
+    if(BLINKS in list(MY_ABC.keys())):#anahtar
+        print (MY_ABC[BLINKS])
+        lcd.write_string(MY_ABC[BLINKS])#lcd ye bastirilma komutu burada aliniyor
+        BLINKS=""#sifirladik ki yeni kelime yazabilelim
+        return ""
+    return BLINKS
+
+
+eye_cascade2 = cv2.CascadeClassifier('haarcascade_eye_tree_eyeglasses.xml') #en iyi buydu
+
+def eyeDetection(gray):
+    # Opencv içerisinde bulunan detection fonksiyonu ile resim üzerinde gözleri detect ediyor
+    eyes = eye_cascade2.detectMultiScale(gray, 1.6, 5)
+    eyes = eyes[:1] #algilanan yuzde en iyi data veren gozu secerek tek goz kirpmasi kullanilarak cikti alinmasini sagliyor
+    # Burada da length yani kaç tane oldugunu return ediyo
+    return len(eyes)
+
+cap = cv2.VideoCapture(0) 
+# göz basta acik olsun dedim
+eye_closed = False
+
+while True:
+    _, frame = cap.read()
+    # fps_s = time()
+    frame = cv2.resize(frame, (450,450))#fps
+    
+    eye_count = eyeDetection(frame)
+
+    if eye_count==0:
+        if not eye_closed:
+            eye_closed = True
+            start = time()
+
+    else:
+        if eye_closed :
+            eye_closed = False
+            # Açildigi zamani ilk kapandigi zamandan çikararak saniye olarak kapali kaldigi süreyi ölçüyor
+            elapsed = time()-start
+            # Eger gözün kapali kaldigi süre 0.15 saniye ile 0.75 saniye arasinda ise Kisa Göz kirpmasi
+
+    if elapsed>0.15 and elapsed<0.75:
+                    total_blink += 1
+                    s_blink+=1 #short blink sayaci artirilir
+                    BLINKS+="0" #blinks stringine 1 eklenir
+                    print(BLINKS)
+                    if total_blink==5: #blink 5 oldugunda 1 kelime bitmis demek
+                        total_blink=0 #toplam blink sifirlanir
+                        BLINKS=PROCESS_MSG(BLINKS)
+                        
+            elif elapsed>=0.75:
+                    total_blink += 1
+                    if total_blink==5: #blink 5 oldugunda 1 kelime bitmis demek
+                        total_blink=0 #toplam blink sifirlanir
+                        BLINKS=PROCESS_MSG(BLINKS)                    
+        elapsed=0;
+cap.release()
